@@ -87,7 +87,7 @@ class ImagePathDataset(torch.utils.data.Dataset):
         return img
 
 
-def get_activations(files, model, batch_size=50, dims=2048, device='cpu', num_workers=8):
+def get_activations(files, model, batch_size=50, dims=2048, device='cpu', num_workers=None):
     """Calculates the activations of the pool_3 layer for all images.
 
     Params:
@@ -107,6 +107,7 @@ def get_activations(files, model, batch_size=50, dims=2048, device='cpu', num_wo
        activations of the given tensor when feeding inception with the
        query tensor.
     """
+    num_workers = num_workers or len(os.sched_getaffinity(0)) # If num_workers is None, overwrites it with the number of cores accessible by this process.
     model.eval()
 
     if batch_size > len(files):
