@@ -51,4 +51,3 @@ class GeneratorBase(ABC):
             batch = self.sample_batch(min(batch_size, self.N - cnt))
             cnt += len(batch)
             yield batch
-        raise StopIteration
