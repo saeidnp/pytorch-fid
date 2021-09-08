@@ -138,7 +138,7 @@ def get_activations_from_loader(loader, N, model, dims=2048, device='cpu'):
 
     start_idx = 0
 
-    for batch in tqdm(loader):
+    for batch in tqdm(loader, desc="Feature extraction for FID"):
         batch = batch.to(device)
 
         with torch.no_grad():
@@ -251,8 +251,8 @@ def compute_statistics(source, model, batch_size, dims, device,
 
 
 def calculate_fid_given_sources(src1, src2, batch_size=64, device="cuda", dims=2048,
-                              num_workers=len(os.sched_getaffinity(0)),
-                              cache1=None, cache2=None):
+                                num_workers=len(os.sched_getaffinity(0)),
+                                cache1=None, cache2=None):
     """Calculates the FID of two sources (path, dataset, or generator)"""
 
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
@@ -294,10 +294,10 @@ def main():
         device = torch.device(args.device)
 
     fid_value = calculate_fid_given_sources(args.path,
-                                          args.batch_size,
-                                          device,
-                                          args.dims,
-                                          args.num_workers)
+                                            args.batch_size,
+                                            device,
+                                            args.dims,
+                                            args.num_workers)
     print('FID: ', fid_value)
 
 
