@@ -41,6 +41,7 @@ import torchvision.transforms as TF
 from PIL import Image
 from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
+from torch.utils.data import Dataset
 
 try:
     from tqdm import tqdm
@@ -130,95 +131,14 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
             + np.trace(sigma2) - 2 * tr_covmean)
 
 
-def get_activations_from_files(files, model, batch_size=50, dims=2048, device='cpu',
-                    num_workers=len(os.sched_getaffinity(0))):
-    """Calculates the activations of the pool_3 layer for all images.
-
-    Params:
-    -- files       : List of image files paths
-    -- model       : Instance of inception model
-    -- batch_size  : Batch size of images for the model to process at once.
-                     Make sure that the number of samples is a multiple of
-                     the batch size, otherwise some samples are ignored. This
-                     behavior is retained to match the original FID score
-                     implementation.
-    -- dims        : Dimensionality of features returned by Inception
-    -- device      : Device to run calculations
-    -- num_workers : Number of parallel dataloader workers
-
-    Returns:
-    -- A numpy array of dimension (num images, dims) that contains the
-       activations of the given tensor when feeding inception with the
-       query tensor.
-    """
+def get_activations_from_loader(loader, N, model, dims=2048, device='cpu'):
     model.eval()
-
-    if batch_size > len(files):
-        print(('Warning: batch size is bigger than the data size. '
-               'Setting batch size to data size'))
-        batch_size = len(files)
-
-    dataset = ImagePathDataset(files, transforms=TF.ToTensor())
-    dataloader = torch.utils.data.DataLoader(dataset,
-                                             batch_size=batch_size,
-                                             shuffle=False,
-                                             drop_last=False,
-                                             num_workers=num_workers)
-
-    pred_arr = np.empty((len(files), dims))
-
-    start_idx = 0
-
-    for batch in tqdm(dataloader):
-        batch = batch.to(device)
-
-        with torch.no_grad():
-            pred = model(batch)
-
-        # If model output is not scalar, apply global spatial average pooling.
-        # This happens if you choose a dimensionality not equal 2048.
-        if pred.size(2) != 1 or pred.size(3) != 1:
-            pred = adaptive_avg_pool2d(pred, output_size=(1, 1))
-
-        pred = pred.squeeze(3).squeeze(2).cpu().numpy()
-
-        pred_arr[start_idx:start_idx + pred.shape[0]] = pred
-
-        start_idx = start_idx + pred.shape[0]
-
-    return pred_arr
-
-
-def get_activations_from_generator(generator, model, batch_size=50, dims=2048, device='cpu'):
-    """Calculates the activations of the pool_3 layer for all images.
-
-    Params:
-    -- generator   : A generator object that samples from the generative model.
-    -- model       : Instance of inception model
-    -- batch_size  : Batch size of images for the model to process at once.
-                     Make sure that the number of samples is a multiple of
-                     the batch size, otherwise some samples are ignored. This
-                     behavior is retained to match the original FID score
-                     implementation.
-    -- dims        : Dimensionality of features returned by Inception
-    -- device      : Device to run calculations
-    -- num_workers : Number of parallel dataloader workers
-
-    Returns:
-    -- A numpy array of dimension (num images, dims) that contains the
-       activations of the given tensor when feeding inception with the
-       query tensor.
-    """
-    model.eval()
-
-    dataloader = generator.loader(batch_size=batch_size)
-    N = generator.N
 
     pred_arr = np.empty((N, dims))
 
     start_idx = 0
 
-    for batch in tqdm(dataloader):
+    for batch in tqdm(loader):
         batch = batch.to(device)
 
         with torch.no_grad():
@@ -238,59 +158,113 @@ def get_activations_from_generator(generator, model, batch_size=50, dims=2048, d
     return pred_arr
 
 
-def compute_statistics_of_path(path, model, batch_size, dims, device,
-                               num_workers=len(os.sched_getaffinity(0)),
-                               cache_path=None):
-    #Caching is ignored when "path" is a generator object
-    if isinstance(path, str):
-        if cache_path is not None:
-            assert cache_path.endswith(".npz")
-            if os.path.exists(cache_path):
-                print("Found cached statistics. Using the cached statistics instead...")
-                path = cache_path
-
-        if path.endswith('.npz'):
-            with np.load(path) as f:
-                m, s = f['mu'][:], f['sigma'][:]
-        else:
-            path = pathlib.Path(path)
-            files = sorted([file for ext in IMAGE_EXTENSIONS
-                           for file in path.glob('*.{}'.format(ext))])
-            act = get_activations_from_files(files, model, batch_size, dims, device, num_workers)
-            m = np.mean(act, axis=0)
-            s = np.cov(act, rowvar=False)
-    elif isinstance(path, GeneratorBase):
-        # "path" is in fact a generator object
-        act = get_activations_from_generator(path, model, batch_size, dims, device)
-        m = np.mean(act, axis=0)
-        s = np.cov(act, rowvar=False)
-    else:
-        raise Exception(f"Unexpected type of \"path\" object (expected one of string or GeneratorBase, received {type(path)})")
-
-    if cache_path is not None and not os.path.exists(cache_path):
-        np.savez(cache_path, mu=m, sigma=s)
-
+def compute_statistics_of_loader(loader, N, model, dims, device):
+    act = get_activations_from_loader(loader=loader, N=N, model=model,
+                                      dims=dims, device=device)
+    m = np.mean(act, axis=0)
+    s = np.cov(act, rowvar=False)
     return m, s
 
 
-def calculate_fid_given_paths(paths, batch_size=64, device="cuda", dims=2048,
+def compute_statistics_of_generator(generator, model, batch_size, dims, device):
+    return compute_statistics_of_loader(loader=generator.loader(batch_size=batch_size),
+                                        N=generator.N, model=model, dims=dims, device=device)
+
+
+def compute_statistics_of_dataset(dataset, model, batch_size, dims, device,
+                                  num_workers=len(os.sched_getaffinity(0))):
+    dataloader = torch.utils.data.DataLoader(dataset,
+                                             batch_size=batch_size,
+                                             shuffle=False,
+                                             drop_last=False,
+                                             num_workers=num_workers)
+    return compute_statistics_of_loader(loader=dataloader, N=len(dataset),
+                                        model=model, dims=dims, device=device)
+
+
+def compute_statistics_of_path(path, model, batch_size, dims, device,
+                               num_workers=len(os.sched_getaffinity(0))):
+    
+    if not os.path.exists(path):
+        raise RuntimeError('Invalid path: %s' % path)
+    if path.endswith('.npz'):
+        with np.load(path) as f:
+            m, s = f['mu'][:], f['sigma'][:]
+        return m, s
+    else:
+        path = pathlib.Path(path)
+        files = sorted([file for ext in IMAGE_EXTENSIONS
+                        for file in path.glob('*.{}'.format(ext))])
+        if batch_size > len(files):
+            print(('Warning: batch size is bigger than the data size. '
+                   'Setting batch size to data size'))
+            batch_size = len(files)
+        dataset = ImagePathDataset(files, transforms=TF.ToTensor())
+
+        return compute_statistics_of_dataset(dataset=dataset, model=model,
+                                             batch_size=batch_size, dims=dims,
+                                             device=device, num_workers=num_workers)
+
+
+def compute_statistics(source, model, batch_size, dims, device,
+                       num_workers=len(os.sched_getaffinity(0)),
+                       cache_path=None):
+    """Computes statistics required by FID based on the model's output in the
+       layer specified according to "dims".
+
+    Params:
+    -- source      : Either of the following
+                     - A path to a directory of images or a .npz file containing the statistics of interest,
+                     - A pytorch dataset object,
+                     - A generator inherited from GeneratorBase class defined in this pytorch_fid.generator.
+    -- model       : Instance of inception model.
+    -- batch_size  : Batch size of images for the model to process at once.
+                     Make sure that the number of samples is a multiple of
+                     the batch size, otherwise some samples are ignored. This
+                     behavior is retained to match the original FID score
+                     implementation.
+    -- dims        : Dimensionality of features returned by Inception.
+    -- device      : Device to run calculations.
+    -- num_workers : Number of parallel dataloader workers.
+    -- cache_path  : A path to a (non-existing) .npz file.
+                     If given, stores the computed statistics at the given path.
+
+    Returns:
+    -- Statistics required by FID (mean and standard deviation of the features)
+    """
+    if isinstance(source, str):
+        m, s = compute_statistics_of_path(path=source, model=model, batch_size=batch_size,
+                                          dims=dims, device=device, num_workers=num_workers)
+    elif isinstance(source, GeneratorBase):
+        m, s = compute_statistics_of_generator(generator=source, model=model, batch_size=batch_size,
+                                               dims=dims, device=device)
+    elif isinstance(source, Dataset):
+        m, s = compute_statistics_of_dataset(dataset=source, model=model, batch_size=batch_size,
+                                             dims=dims, device=device, num_workers=num_workers)
+    else:
+        raise Exception(f"Unexpected type of \"path\" object (expected one of string or GeneratorBase, received {type(source)})")
+
+    if cache_path is not None:
+        np.savez(cache_path, mu=m, sigma=s)
+    
+    return m, s
+
+
+def calculate_fid_given_sources(src1, src2, batch_size=64, device="cuda", dims=2048,
                               num_workers=len(os.sched_getaffinity(0)),
-                              cache_paths=[None, None]):
-    """Calculates the FID of two paths"""
-    for p in paths:
-        if isinstance(p, str) and not os.path.exists(p):
-            raise RuntimeError('Invalid path: %s' % p)
+                              cache1=None, cache2=None):
+    """Calculates the FID of two sources (path, dataset, or generator)"""
 
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
 
     model = InceptionV3Single(block_idx).to(device)
 
-    m1, s1 = compute_statistics_of_path(paths[0], model, batch_size,
-                                        dims, device, num_workers,
-                                        cache_path=cache_paths[0])
-    m2, s2 = compute_statistics_of_path(paths[1], model, batch_size,
-                                        dims, device, num_workers,
-                                        cache_path=cache_paths[1])
+    m1, s1 = compute_statistics(src1, model, batch_size,
+                                dims, device, num_workers,
+                                cache_path=cache1)
+    m2, s2 = compute_statistics(src2, model, batch_size,
+                                dims, device, num_workers,
+                                cache_path=cache2)
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
 
     return fid_value
@@ -307,10 +281,10 @@ def main():
     parser.add_argument('--dims', type=int, default=2048,
                         choices=list(InceptionV3.BLOCK_INDEX_BY_DIM),
                         help=('Dimensionality of Inception features to use. '
-                            'By default, uses pool3 features'))
+                              'By default, uses pool3 features'))
     parser.add_argument('path', type=str, nargs=2,
                         help=('Paths to the generated images or '
-                            'to .npz statistic files'))
+                              'to .npz statistic files'))
 
     args = parser.parse_args()
 
@@ -319,7 +293,7 @@ def main():
     else:
         device = torch.device(args.device)
 
-    fid_value = calculate_fid_given_paths(args.path,
+    fid_value = calculate_fid_given_sources(args.path,
                                           args.batch_size,
                                           device,
                                           args.dims,

@@ -34,7 +34,7 @@ def test_calculate_fid_given_statistics(mocker, tmp_path, device):
         path.mkdir()
         paths.append(str(path))
 
-    fid_value = fid_score.calculate_fid_given_paths(paths,
+    fid_value = fid_score.calculate_fid_given_sources(paths,
                                                     batch_size=dim,
                                                     device=device,
                                                     dims=dim)
