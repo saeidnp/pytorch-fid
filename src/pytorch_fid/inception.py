@@ -163,6 +163,14 @@ class InceptionV3(nn.Module):
         return outp
 
 
+class InceptionV3Single(InceptionV3):
+    def __init__(self, output_block, *args, **kwargs):
+        super().__init__([output_block], *args, **kwargs)
+
+    def forward(self, inp):
+        return super().forward(inp)[0]
+
+
 def _inception_v3(*args, **kwargs):
     """Wraps `torchvision.models.inception_v3`
 
