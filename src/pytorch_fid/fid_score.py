@@ -58,6 +58,13 @@ IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
                     'tif', 'tiff', 'webp'}
 
 
+def num_avail_cores():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return 4
+
+
 class ImagePathDataset(torch.utils.data.Dataset):
     def __init__(self, files, transforms=None):
         self.files = files
@@ -172,7 +179,7 @@ def compute_statistics_of_generator(generator, model, batch_size, dims, device):
 
 
 def compute_statistics_of_dataset(dataset, model, batch_size, dims, device,
-                                  num_workers=len(os.sched_getaffinity(0))):
+                                  num_workers=num_avail_cores()):
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              shuffle=False,
@@ -183,7 +190,7 @@ def compute_statistics_of_dataset(dataset, model, batch_size, dims, device,
 
 
 def compute_statistics_of_path(path, model, batch_size, dims, device,
-                               num_workers=len(os.sched_getaffinity(0))):
+                               num_workers=num_avail_cores()):
     
     if not os.path.exists(path):
         raise RuntimeError('Invalid path: %s' % path)
@@ -207,7 +214,7 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
 
 
 def compute_statistics(source, model, batch_size, dims, device,
-                       num_workers=len(os.sched_getaffinity(0)),
+                       num_workers=num_avail_cores(),
                        cache_path=None):
     """Computes statistics required by FID based on the model's output in the
        layer specified according to "dims".
@@ -251,7 +258,7 @@ def compute_statistics(source, model, batch_size, dims, device,
 
 
 def calculate_fid_given_sources(src1, src2, batch_size=64, device="cuda", dims=2048,
-                                num_workers=len(os.sched_getaffinity(0)),
+                                num_workers=num_avail_cores(),
                                 cache1=None, cache2=None):
     """Calculates the FID of two sources (path, dataset, or generator)"""
 
@@ -274,7 +281,7 @@ def main():
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('--batch-size', type=int, default=50,
                         help='Batch size to use')
-    parser.add_argument('--num-workers', type=int, default=len(os.sched_getaffinity(0)),
+    parser.add_argument('--num-workers', type=int, default=num_avail_cores(),
                         help='Number of processes to use for data loading')
     parser.add_argument('--device', type=str, default=None,
                         help='Device to use. Like cuda, cuda:0 or cpu')
