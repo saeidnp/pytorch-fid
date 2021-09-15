@@ -27,7 +27,7 @@ class GeneratorBase(ABC):
         microbatch_size_list = np.concatenate([microbatch_size_list, [batch_size]])
         microbatch_size_list = microbatch_size_list[1:] - microbatch_size_list[:-1]
         assert sum(microbatch_size_list) == batch_size, "Internal error in creating the sequence of microbatch sizes"
-        batch = torch.cat([self.sample(b) for b in microbatch_size_list], dim=0)
+        batch = torch.cat([self.sample(int(b)) for b in microbatch_size_list], dim=0)
         return batch
 
     @abstractmethod
